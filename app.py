@@ -8,36 +8,20 @@ from tkinter import ttk, messagebox
 
 import pandas as pd
 from openpyxl import load_workbook
+from rapidfuzz import fuzz
 
 EXCEL_FILE = "diafragmas.xlsx"
 COLUMNAS_REQUERIDAS = ["Marca", "Modelo", "Carburador", "Diafragma"]
 
 
 def normalizar_texto(valor: str) -> str:
-    """Convierte a MAYÚSCULAS y elimina espacios, guiones y caracteres especiales."""
+    """Normaliza texto para comparar ignorando acentos, espacios, guiones y mayúsculas."""
     if valor is None:
         return ""
-    texto = str(valor).strip().upper()
+    texto = str(valor).strip().lower()
     texto = unicodedata.normalize("NFKD", texto)
     texto = "".join(ch for ch in texto if not unicodedata.combining(ch))
-    return re.sub(r"[^A-Z0-9]", "", texto)
-
-
-def extraer_bloques_numericos(texto: str) -> list[str]:
-    """Extrae secuencias numéricas contiguas del texto normalizado."""
-    return re.findall(r"\d+", texto)
-
-
-def coincide_bloque_numerico(modelo_norm: str, consulta_norm: str) -> bool:
-    """
-    Regla de negocio para consultas numéricas:
-    - si consulta es solo números, el modelo debe contener exactamente ese bloque numérico
-      con límites no numéricos (inicio/fin o letras), evitando 0510/5100/1510.
-    """
-    if not consulta_norm or not consulta_norm.isdigit():
-        return False
-    patron = rf"(?<!\d){re.escape(consulta_norm)}(?!\d)"
-    return re.search(patron, modelo_norm) is not None
+    return re.sub(r"[\s\-]+", "", texto)
 
 
 class DiafragmaApp:
@@ -80,6 +64,7 @@ class DiafragmaApp:
             style="Hint.TLabel",
         ).pack(anchor="w", pady=(0, 14))
 
+        # Panel de selección por desplegables
         panel_sel = ttk.LabelFrame(contenedor, text="Búsqueda por desplegables")
         panel_sel.pack(fill="x", pady=(0, 10))
 
@@ -96,6 +81,7 @@ class DiafragmaApp:
         self.cmb_modelo.bind("<<ComboboxSelected>>", self.al_elegir_modelo)
         panel_sel.columnconfigure(1, weight=1)
 
+        # Panel de búsqueda libre
         panel_busq = ttk.LabelFrame(contenedor, text="Búsqueda libre inteligente")
         panel_busq.pack(fill="both", expand=True, pady=(0, 10))
 
@@ -119,14 +105,16 @@ class DiafragmaApp:
         panel_busq.columnconfigure(0, weight=1)
         panel_busq.rowconfigure(1, weight=1)
 
+        # Mensajes de estado y acciones
         self.var_estado = tk.StringVar(value="")
         self.lbl_estado = ttk.Label(contenedor, textvariable=self.var_estado, foreground="#b42318")
         self.lbl_estado.pack(anchor="w", pady=(0, 6))
 
         self.btn_chatgpt = ttk.Button(
-            contenedor, text="Buscar en ChatGPT", style="Big.TButton", command=self.abrir_chatgpt
+            contenedor, text="Consultar con ChatGPT", style="Big.TButton", command=self.abrir_chatgpt
         )
 
+        # Panel de detalle
         panel_detalle = ttk.Frame(contenedor, style="Card.TFrame", padding=14)
         panel_detalle.pack(fill="x", pady=(0, 10))
 
@@ -138,7 +126,10 @@ class DiafragmaApp:
         self.lbl_diafragma = ttk.Label(panel_detalle, text="-", style="Info.TLabel")
         self.lbl_diafragma.grid(row=1, column=1, sticky="w", pady=4)
 
+        # Formulario nuevo registro
         self.frm_nuevo = ttk.LabelFrame(contenedor, text="Agregar nuevo registro")
+        self.frm_nuevo.pack(fill="x")
+
         self.var_nueva_marca = tk.StringVar()
         self.var_nuevo_modelo = tk.StringVar()
         self.var_nuevo_carburador = tk.StringVar()
@@ -150,21 +141,26 @@ class DiafragmaApp:
             ("Carburador", self.var_nuevo_carburador),
             ("Diafragma", self.var_nuevo_diafragma),
         ]
+
         for idx, (texto, var) in enumerate(campos):
             ttk.Label(self.frm_nuevo, text=f"{texto}:").grid(row=idx // 2, column=(idx % 2) * 2, sticky="w", padx=10, pady=8)
             ttk.Entry(self.frm_nuevo, textvariable=var, width=30).grid(
                 row=idx // 2, column=(idx % 2) * 2 + 1, sticky="ew", padx=10, pady=8
             )
+
         ttk.Button(self.frm_nuevo, text="Guardar en Excel", style="Big.TButton", command=self.guardar_nuevo_registro).grid(
             row=2, column=0, columnspan=4, pady=(4, 10)
         )
         self.frm_nuevo.columnconfigure(1, weight=1)
         self.frm_nuevo.columnconfigure(3, weight=1)
+        self.frm_nuevo.pack_forget()
 
     def cargar_excel(self) -> None:
+        """Carga el Excel de consulta y valida columnas esperadas."""
         if not os.path.exists(EXCEL_FILE):
             messagebox.showerror("Error", f"No existe el archivo: {EXCEL_FILE}")
             return
+
         try:
             df = pd.read_excel(EXCEL_FILE, engine="openpyxl")
         except PermissionError:
@@ -188,7 +184,6 @@ class DiafragmaApp:
         self.cmb_marca["values"] = marcas
         self.cmb_modelo.set("")
         self.cmb_modelo["values"] = []
-        self.ocultar_formulario_nuevo()
 
     def al_elegir_marca(self, _event=None) -> None:
         marca = self.var_marca.get()
@@ -204,44 +199,26 @@ class DiafragmaApp:
         self.mostrar_resultados(fila.iloc[0].to_dict() if not fila.empty else None)
 
     def buscar_similares(self, consulta_norm: str) -> tuple[list[dict], list[dict]]:
-        """
-        Búsqueda determinística:
-        - Exacta por igualdad de texto normalizado (Modelo o Diafragma).
-        - Si la consulta es numérica, coincide solo por bloque numérico exacto en Modelo.
-        - Si la consulta es alfanumérica, coincide por contención directa normalizada.
-        """
         exactos, similares = [], []
-        consulta_numerica = consulta_norm.isdigit()
-
         for _, fila in self.df.iterrows():
-            modelo_norm = fila["norm_modelo"]
-            diafragma_norm = fila["norm_diafragma"]
-
+            score_modelo = fuzz.WRatio(consulta_norm, fila["norm_modelo"])
+            score_diafragma = fuzz.WRatio(consulta_norm, fila["norm_diafragma"])
+            score = max(score_modelo, score_diafragma)
+            es_exacto = consulta_norm in {fila["norm_modelo"], fila["norm_diafragma"]}
             item = {
                 "Marca": fila["Marca"],
                 "Modelo": fila["Modelo"],
                 "Carburador": fila["Carburador"],
                 "Diafragma": fila["Diafragma"],
-                "score": 100,
+                "score": int(score),
             }
-
-            # Coincidencia exacta estricta
-            if consulta_norm == modelo_norm or consulta_norm == diafragma_norm:
+            if es_exacto:
                 exactos.append(item)
-                continue
+            elif score >= 60:
+                similares.append(item)
 
-            if consulta_numerica:
-                # Solo bloque numérico exacto; evita 0510, 5100, 1510, etc.
-                if coincide_bloque_numerico(modelo_norm, consulta_norm):
-                    similares.append(item)
-            else:
-                # Para texto alfanumérico, contención directa sin fuzzy amplio
-                if consulta_norm and (consulta_norm in modelo_norm or consulta_norm in diafragma_norm):
-                    similares.append(item)
-
-        # Orden estable y predecible
-        exactos.sort(key=lambda x: (normalizar_texto(x["Marca"]), normalizar_texto(x["Modelo"])))
-        similares.sort(key=lambda x: (normalizar_texto(x["Marca"]), normalizar_texto(x["Modelo"])))
+        exactos.sort(key=lambda x: x["score"], reverse=True)
+        similares.sort(key=lambda x: x["score"], reverse=True)
         return exactos, similares
 
     def buscar_modelo(self) -> None:
@@ -251,7 +228,6 @@ class DiafragmaApp:
 
         if not consulta:
             self.var_estado.set("Ingrese un modelo o código para buscar.")
-            self.ocultar_formulario_nuevo()
             return
 
         consulta_norm = normalizar_texto(consulta)
@@ -261,40 +237,31 @@ class DiafragmaApp:
             self.lista_resultados.insert(tk.END, "=== Coincidencias exactas ===")
             for r in exactos:
                 self.resultados_actuales.append(r)
-                self.lista_resultados.insert(tk.END, f"{r['Marca']} | {r['Modelo']} | Diafragma: {r['Diafragma']}")
+                self.lista_resultados.insert(
+                    tk.END,
+                    f"{r['Marca']} | {r['Modelo']} | Diafragma: {r['Diafragma']} | {r['score']}%",
+                )
 
         if similares:
             self.lista_resultados.insert(tk.END, "=== Coincidencias similares ===")
             for r in similares[:20]:
                 self.resultados_actuales.append(r)
-                self.lista_resultados.insert(tk.END, f"{r['Marca']} | {r['Modelo']} | Diafragma: {r['Diafragma']}")
+                self.lista_resultados.insert(
+                    tk.END,
+                    f"{r['Marca']} | {r['Modelo']} | Diafragma: {r['Diafragma']} | {r['score']}%",
+                )
 
         if not exactos and not similares:
-            self.mostrar_sin_resultados()
+            self.var_estado.set("No se encontró el modelo en la planilla de consulta.")
+            self.mostrar_formulario_nuevo(True)
+            self.btn_chatgpt.pack(anchor="w", pady=(0, 8))
             self.var_nuevo_modelo.set(consulta)
             self.mostrar_resultados(None)
             return
 
         self.var_estado.set("")
-        self.ocultar_formulario_nuevo()
-
-    def mostrar_sin_resultados(self) -> None:
-        """Muestra aviso de no encontrado y habilita acciones de ayuda/carga manual."""
-        self.var_estado.set("No se encontró el modelo en la planilla de consulta.")
-        self.btn_chatgpt.pack(anchor="w", pady=(0, 8))
-        self.mostrar_formulario_nuevo()
-
-    def ocultar_formulario_nuevo(self) -> None:
-        """Oculta botón de ChatGPT y formulario de alta manual."""
         self.btn_chatgpt.pack_forget()
-        self.frm_nuevo.pack_forget()
-
-    def mostrar_formulario_nuevo(self) -> None:
-        """Muestra formulario de alta manual y precarga marca/modelo conocidos."""
-        self.frm_nuevo.pack(fill="x")
-        self.var_nueva_marca.set(self.var_marca.get().strip())
-        if not self.var_nuevo_modelo.get().strip():
-            self.var_nuevo_modelo.set(self.var_busqueda.get().strip())
+        self.mostrar_formulario_nuevo(False)
 
     def mostrar_resultados(self, fila: dict | None) -> None:
         if not fila:
@@ -314,7 +281,8 @@ class DiafragmaApp:
 
         idx_datos = 0
         for pos in range(i[0] + 1):
-            if not self.lista_resultados.get(pos).startswith("==="):
+            linea = self.lista_resultados.get(pos)
+            if not linea.startswith("==="):
                 idx_datos += 1
         registro = self.resultados_actuales[idx_datos - 1]
         self.mostrar_resultados(registro)
@@ -322,8 +290,15 @@ class DiafragmaApp:
         self.al_elegir_marca()
         self.var_modelo.set(str(registro["Modelo"]))
 
+    def mostrar_formulario_nuevo(self, mostrar: bool) -> None:
+        if mostrar:
+            self.frm_nuevo.pack(fill="x")
+            self.var_nueva_marca.set(self.var_marca.get().strip())
+            self.var_nuevo_modelo.set(self.var_busqueda.get().strip())
+        else:
+            self.frm_nuevo.pack_forget()
+
     def guardar_nuevo_registro(self) -> None:
-        """Agrega una nueva fila al final del Excel existente y recarga la base."""
         marca = self.var_nueva_marca.get().strip()
         modelo = self.var_nuevo_modelo.get().strip()
         carburador = self.var_nuevo_carburador.get().strip()
@@ -352,16 +327,15 @@ class DiafragmaApp:
             messagebox.showerror("Error", f"Ocurrió un error al guardar:\n{exc}")
             return
 
-        self.cargar_excel()
-        self.lista_resultados.delete(0, tk.END)
-        self.resultados_actuales = []
-        self.var_nueva_marca.set("")
-        self.var_nuevo_modelo.set("")
-        self.var_nuevo_carburador.set("")
-        self.var_nuevo_diafragma.set("")
-        self.ocultar_formulario_nuevo()
-        self.var_estado.set("Registro agregado correctamente.")
         messagebox.showinfo("Éxito", "Registro agregado correctamente.")
+        self.cargar_excel()
+        self.var_marca.set(marca)
+        self.al_elegir_marca()
+        self.var_modelo.set(modelo)
+        self.mostrar_resultados({"Carburador": carburador, "Diafragma": diafragma})
+        self.mostrar_formulario_nuevo(False)
+        self.btn_chatgpt.pack_forget()
+        self.var_estado.set("")
 
     def abrir_chatgpt(self) -> None:
         marca = self.var_nueva_marca.get().strip() or self.var_marca.get().strip() or "(sin marca)"
