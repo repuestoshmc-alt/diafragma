@@ -5,6 +5,7 @@ from urllib.parse import quote
 
 import pandas as pd
 import tkinter as tk
+from openpyxl import load_workbook
 from tkinter import messagebox, ttk
 
 EXCEL_PATH = Path(__file__).resolve().parent / "diafragmas.xlsx"
@@ -264,6 +265,7 @@ class DiafragmasApp:
             self.var_nueva_marca.set(marca)
         if modelo and not self.var_nuevo_modelo.get().strip():
             self.var_nuevo_modelo.set(modelo)
+        print("Mostrando panel sin resultados")
         self.panel_sin_resultados.pack(fill="x", pady=(0, 10))
 
     def ocultar_panel_sin_resultados(self) -> None:
@@ -279,6 +281,8 @@ class DiafragmasApp:
         webbrowser.open_new_tab(url)
 
     def guardar_nuevo_registro(self) -> None:
+        print("Guardando nuevo registro")
+
         marca = self.var_nueva_marca.get().strip()
         modelo = self.var_nuevo_modelo.get().strip()
         carburador = self.var_nuevo_carburador.get().strip()
@@ -293,7 +297,7 @@ class DiafragmasApp:
         for _, fila in self.df.iterrows():
             clave_actual = f"{normalizar_texto(fila['Marca'])}|{normalizar_texto(fila['Modelo'])}"
             if clave_actual == clave_nueva:
-                messagebox.showwarning("Duplicado", "Ya existe un registro con la misma Marca + Modelo.")
+                messagebox.showwarning("Duplicado", "Ese modelo ya existe en la base.")
                 return
 
         if not EXCEL_PATH.exists():
@@ -301,17 +305,18 @@ class DiafragmasApp:
             return
 
         try:
-            df_excel = pd.read_excel(EXCEL_PATH, engine="openpyxl")
-            faltantes = [c for c in COLUMNAS_REQUERIDAS if c not in df_excel.columns]
+            workbook = load_workbook(EXCEL_PATH)
+            worksheet = workbook.active
+
+            headers = [cell.value for cell in worksheet[1]]
+            faltantes = [c for c in COLUMNAS_REQUERIDAS if c not in headers]
             if faltantes:
                 messagebox.showerror("Error", f"Faltan columnas requeridas: {', '.join(faltantes)}")
                 return
 
-            nueva_fila = pd.DataFrame(
-                [{"Marca": marca, "Modelo": modelo, "Carburador": carburador, "Diafragma": diafragma}]
-            )
-            df_actualizado = pd.concat([df_excel, nueva_fila], ignore_index=True)
-            df_actualizado.to_excel(EXCEL_PATH, index=False, engine="openpyxl")
+            worksheet.append([marca, modelo, carburador, diafragma])
+            workbook.save(EXCEL_PATH)
+            workbook.close()
 
         except PermissionError:
             messagebox.showerror("Error", "No se puede guardar. Cierre el archivo Excel si está abierto.")
@@ -325,6 +330,8 @@ class DiafragmasApp:
         self.var_nuevo_modelo.set("")
         self.var_nuevo_carburador.set("")
         self.var_nuevo_diafragma.set("")
+        self.ocultar_panel_sin_resultados()
+        print("Registro agregado correctamente")
         messagebox.showinfo("Éxito", "Registro agregado correctamente")
 
     def _limpiar_resultados(self) -> None:
