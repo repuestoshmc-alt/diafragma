@@ -129,7 +129,7 @@ class DiafragmasApp:
         ttk.Button(
             self.panel_sin_resultados,
             text="Guardar en Excel",
-            command=self.guardar_nuevo_registro,
+            command=lambda: (print("Botón guardar presionado"), self.guardar_nuevo_registro()),
         ).grid(row=7, column=0, columnspan=2, sticky="ew", pady=(10, 0))
         self.panel_sin_resultados.columnconfigure(1, weight=1)
 
@@ -332,7 +332,7 @@ class DiafragmasApp:
         self.var_nuevo_diafragma.set("")
         self.ocultar_panel_sin_resultados()
         print("Registro agregado correctamente")
-        messagebox.showinfo("Éxito", "Registro agregado correctamente")
+        messagebox.showinfo("OK", "Registro agregado correctamente")
 
     def _limpiar_resultados(self) -> None:
         self.var_resultado_marca.set("-")
