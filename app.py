@@ -81,7 +81,7 @@ class DiafragmasApp:
         self.entry_manual.grid(row=0, column=0, sticky="ew", padx=(0, 8))
         self.entry_manual.bind("<Return>", lambda _e: self.buscar_modelo())
 
-        ttk.Button(panel_manual, text="Buscar", command=self.buscar_modelo).grid(row=0, column=1)
+        ttk.Button(panel_manual, text="Buscar", command=lambda: self.buscar_modelo(entrada_manual=self.var_manual.get())).grid(row=0, column=1)
         panel_manual.columnconfigure(0, weight=1)
 
         panel_res = ttk.LabelFrame(contenedor, text="Resultados", padding=12)
@@ -193,35 +193,39 @@ class DiafragmasApp:
         if self.df.empty:
             return []
 
-        if entrada_manual is None:
-            entrada_manual = self.var_manual.get().strip()
+        busqueda_manual = entrada_manual if entrada_manual is not None else self.var_manual.get()
 
         marca_input = marca.strip()
         modelo_input = modelo.strip()
-        manual_input = entrada_manual.strip()
+        manual_input = busqueda_manual.strip()
 
         resultados = []
 
         if manual_input:
-            consulta_norm = normalizar_texto(manual_input)
-            consulta_num = extraer_numero_base(manual_input)
+            texto = manual_input
+            texto_normalizado = normalizar_texto(texto)
+            numero_base = extraer_numero_base(texto)
+
+            print("Texto buscado:", texto)
+            print("Texto normalizado:", texto_normalizado)
+            print("Número base:", numero_base)
+
+            es_busqueda_numerica = texto_normalizado.isdigit()
 
             for _, fila in self.df.iterrows():
                 fila_dict = {col: str(fila[col]).strip() for col in COLUMNAS_REQUERIDAS}
                 modelo_fila = fila_dict["Modelo"]
-                modelo_norm = normalizar_texto(modelo_fila)
-                numero_fila = extraer_numero_base(modelo_fila)
+                modelo_normalizado = normalizar_texto(modelo_fila)
+                numero_base_modelo = extraer_numero_base(modelo_fila)
 
-                coincide_texto = consulta_norm and consulta_norm == modelo_norm
-                coincide_numero_controlado = (
-                    consulta_num
-                    and consulta_num == manual_input.strip()
-                    and numero_fila == consulta_num
-                    and consulta_num == str(int(consulta_num))
-                )
+                if es_busqueda_numerica:
+                    if numero_base and numero_base == numero_base_modelo:
+                        resultados.append(fila_dict)
+                else:
+                    if texto_normalizado and texto_normalizado == modelo_normalizado:
+                        resultados.append(fila_dict)
 
-                if coincide_texto or coincide_numero_controlado:
-                    resultados.append(fila_dict)
+            print("Cantidad de resultados:", len(resultados))
         else:
             marca_norm = normalizar_texto(marca_input)
             modelo_norm = normalizar_texto(modelo_input)
@@ -234,11 +238,10 @@ class DiafragmasApp:
                 ):
                     resultados.append(fila_dict)
 
-        if entrada_manual is None:
-            if resultados:
-                self.mostrar_resultados(resultados)
-            else:
-                self.mostrar_sin_resultados(marca_input, modelo_input or manual_input)
+        if resultados:
+            self.mostrar_resultados(resultados)
+        else:
+            self.mostrar_sin_resultados(marca_input, modelo_input or manual_input)
 
         return resultados
 
