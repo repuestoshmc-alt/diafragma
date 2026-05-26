@@ -5,10 +5,12 @@ from urllib.parse import quote
 
 import pandas as pd
 import tkinter as tk
+from PIL import Image, ImageTk
 from openpyxl import load_workbook
 from tkinter import messagebox, ttk
 
 EXCEL_PATH = Path(__file__).resolve().parent / "diafragmas.xlsx"
+IMAGENES_PATH = Path(__file__).resolve().parent / "imagenes"
 COLUMNAS_REQUERIDAS = ["Marca", "Modelo", "Carburador", "Diafragma"]
 
 
@@ -50,6 +52,7 @@ class DiafragmasApp:
         self.var_nuevo_modelo = tk.StringVar()
         self.var_nuevo_carburador = tk.StringVar()
         self.var_nuevo_diafragma = tk.StringVar()
+        self.imagen_actual = None
 
         self._construir_interfaz()
         self.carregar_excel()
@@ -96,6 +99,9 @@ class DiafragmasApp:
         ttk.Label(panel_res, textvariable=self.var_resultado_carburador).grid(row=2, column=1, sticky="w", pady=2)
         ttk.Label(panel_res, text="Diafragma:").grid(row=3, column=0, sticky="w", pady=2)
         ttk.Label(panel_res, textvariable=self.var_resultado_diafragma).grid(row=3, column=1, sticky="w", pady=2)
+
+        self.label_imagen = ttk.Label(panel_res, text="Imagen no disponible", anchor="center")
+        self.label_imagen.grid(row=4, column=0, columnspan=2, sticky="nsew", pady=(10, 0))
 
         self.panel_sin_resultados = ttk.LabelFrame(contenedor, text="Sin resultados", padding=12)
 
@@ -258,6 +264,7 @@ class DiafragmasApp:
         self.var_resultado_diafragma.set(primero["Diafragma"])
 
         self.ocultar_panel_sin_resultados()
+        self.mostrar_imagen_diafragma(primero["Diafragma"])
 
     def mostrar_sin_resultados(self, marca: str = "", modelo: str = "") -> None:
         self._limpiar_resultados()
@@ -266,6 +273,7 @@ class DiafragmasApp:
         if modelo and not self.var_nuevo_modelo.get().strip():
             self.var_nuevo_modelo.set(modelo)
         print("Mostrando panel sin resultados")
+        self.limpiar_imagen()
         self.panel_sin_resultados.pack(fill="x", pady=(0, 10))
 
     def ocultar_panel_sin_resultados(self) -> None:
@@ -334,11 +342,48 @@ class DiafragmasApp:
         print("Registro agregado correctamente")
         messagebox.showinfo("OK", "Registro agregado correctamente")
 
+    def limpiar_imagen(self) -> None:
+        self.imagen_actual = None
+        self.label_imagen.configure(image="", text="Imagen no disponible")
+
+    def mostrar_imagen_diafragma(self, codigo) -> None:
+        codigo_texto = str(codigo).strip()
+        print("Código diafragma:", codigo_texto)
+
+        if not codigo_texto:
+            print("No se encontró imagen")
+            self.limpiar_imagen()
+            return
+
+        for extension in (".jpg", ".png", ".jpeg"):
+            ruta = IMAGENES_PATH / f"{codigo_texto}{extension}"
+            print("Ruta probada:", ruta)
+            print("Existe:", ruta.exists())
+
+            if not ruta.exists():
+                continue
+
+            try:
+                img = Image.open(ruta)
+                img.thumbnail((250, 180))
+                foto = ImageTk.PhotoImage(img)
+                self.label_imagen.configure(image=foto, text="")
+                self.label_imagen.image = foto
+                self.imagen_actual = foto
+                print("Imagen cargada correctamente")
+                return
+            except Exception:
+                continue
+
+        print("No se encontró imagen")
+        self.label_imagen.configure(image="", text="Imagen no disponible")
+
     def _limpiar_resultados(self) -> None:
         self.var_resultado_marca.set("-")
         self.var_resultado_modelo.set("-")
         self.var_resultado_carburador.set("-")
         self.var_resultado_diafragma.set("-")
+        self.limpiar_imagen()
 
 
 def main() -> None:
