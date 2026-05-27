@@ -283,6 +283,8 @@ class DiafragmasApp:
         webbrowser.open_new_tab(url)
 
     def guardar_nuevo_registro(self) -> None:
+        print("Guardando nuevo registro")
+
         marca = self.var_nueva_marca.get().strip()
         modelo = self.var_nuevo_modelo.get().strip()
         carburador = self.var_nuevo_carburador.get().strip()
